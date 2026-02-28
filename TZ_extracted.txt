@@ -1,0 +1,520 @@
+ТЕХНИЧЕСКОЕ ЗАДАНИЕ
+Система управления автосервисом
+Полная документация для разработчика
+Версия 2.0  |  28.02.2026
+
+1. Общие сведения
+1.1 Назначение системы
+Веб-приложение предназначено для автоматизации работы сети автомастерских: управления заявками клиентов, контроля работы мастеров смены и администрирования системы. Все три роли работают в едином интерфейсе.
+
+1.2 Технологический стек
+
+1.3 Бизнес-роли (3 роли)
+
+
+2. Архитектура системы
+2.1 Общая схема взаимодействия
+Система построена по архитектуре клиент–сервер (SPA + REST API):
+
+2.2 Структура директорий проекта
+Backend (Python / FastAPI)
+
+Frontend (React / TypeScript)
+
+
+3. База данных (PostgreSQL)
+3.1 Схема таблиц
+
+3.2 Индексы
+
+3.3 Перечень статусов заявки
+
+
+4. Backend — REST API (FastAPI)
+4.1 Авторизация
+Все защищённые маршруты требуют заголовка:
+
+JWT-токен выдаётся при логине и содержит: user_id, role, exp (время жизни 8 часов).
+Dependency get_current_user() — декодирует JWT, возвращает объект пользователя. Используется в каждом роутере.
+
+4.2 Эндпоинты
+
+4.3 Логика заглушки оплаты
+ВАЖНО: никакого реального платёжного шлюза нет. Логика следующая:
+Клиент заполняет форму с полями карты (номер, срок, CVV) — это поля только для UI, данные не сохраняются в БД;
+Frontend отправляет POST /payments/stub с order_id и amount;
+Backend создаёт запись в таблице payments со статусом stub_ok, НЕ обрабатывает данные карты;
+Backend возвращает { success: true };
+Frontend перенаправляет на страницу заявок с сообщением «Заявка успешно зарегистрирована».
+
+
+5. Frontend — логика и структура (React)
+5.1 Роутинг (React Router v6)
+
+5.2 Хранение аутентификации
+
+5.3 Axios-инстанс с интерцептором
+
+
+6. Дизайн интерфейса — экраны и компоненты
+Общий стиль: светлая тема, основной цвет — синий (#2E75B6), акцент — тёмно-синий (#1F3864). Шрифт — Inter или Roboto. Скруглённые кнопки (border-radius: 8px). Адаптивная вёрстка.
+
+6.1 Страница входа (/login)
+Логика frontend:
+Форма: React Hook Form + Yup-валидация (email формат, пароль мин. 6 символов);
+POST /auth/login → получаем { token, user } → сохраняем в store и localStorage → redirect на /orders;
+При ошибке 401 — показываем «Неверный email или пароль».
+
+6.2 Навигационная панель (Navbar)
+Логика: Navbar читает роль из authStore и условно скрывает/показывает пункты меню через проверку role === 'admin'.
+
+6.3 Страница «Заявки» (/orders)
+Логика frontend:
+При монтировании компонент вызывает GET /orders/ (Master/Admin) или GET /orders/my (Client);
+Фильтры применяются через query-параметры: ?status=new&status=in_progress&search=Иванов&date_from=2024-01-01;
+Сортировка по колонкам: клик на заголовок меняет sort_by и sort_order в URL;
+Строка таблицы при клике открывает модальное окно с деталями заявки;
+Цвет Badge статуса: new → серый, in_progress → синий, in_repair → оранжевый, done → зелёный.
+
+6.4 Форма создания заявки (/orders/new)
+Логика frontend:
+Валидация: React Hook Form + Yup. Поле «год» — только число, 4 цифры;
+Услуги подгружаются при монтировании из GET /services/;
+После валидации данные сохраняются в sessionStorage (или store) и выполняется переход на /payment;
+На странице /payment данные формы отображаются в «шапке» (авто, услуга, итого).
+
+6.5 Страница оплаты — ЗАГЛУШКА (/payment)
+⚠️ ВНИМАНИЕ: Эта страница является декоративной заглушкой. Никакого реального платежа не происходит. После нажатия «Оплатить» система просто создаёт заявку.
+Логика frontend:
+Компонент читает данные заявки из sessionStorage/store;
+Поля карты: маска через react-input-mask или аналог. Данные НИГДЕ не сохраняются и не отправляются;
+При нажатии «Оплатить»:
+1. POST /orders/ — создаётся заявка, возвращается order_id;
+2. POST /payments/stub { order_id, amount } — создаётся запись-заглушка;
+3. При успехе — redirect на /orders с toast-уведомлением «Заявка #N успешно создана»;
+4. При ошибке — показывается alert «Что-то пошло не так, попробуйте ещё раз».
+Кнопка блокируется (disabled + спиннер) во время выполнения запросов.
+
+6.6 Форма обработки заявки (модальное окно — только Мастер)
+Логика frontend:
+Модальное окно открывается при клике «Обработать» в таблице заявок;
+При сохранении: PATCH /orders/{id} с изменёнными полями;
+Если выбран мастер → статус автоматически становится in_repair;
+При нажатии «Готово»: PATCH /orders/{id} { status: 'done' } → после успеха модал закрывается, в строке таблицы Badge меняется на «Готово», появляется popover с контактами клиента.
+
+6.7 Страница пользователей (/users) — только Администратор
+Логика: POST /users/ для создания, PATCH /users/{id} для редактирования, DELETE /users/{id} для деактивации (is_active = false, не физическое удаление).
+
+6.8 Страница услуг (/services)
+Клиент видит страницу только для чтения. Мастер не имеет доступа.
+
+
+7. Дизайн-система и компоненты
+7.1 Цветовая палитра
+
+7.2 Компоненты Button
+
+7.3 Badge статуса заявки
+
+7.4 Уведомления (Toast / Alert)
+Успех (зелёный) — «Заявка #5 успешно создана», «Изменения сохранены»;
+Ошибка (красный) — «Не удалось сохранить. Попробуйте снова»;
+Инфо (синий) — «Контакты клиента: +7 999 123-45-67»;
+Toast появляется в правом верхнем углу, автоматически скрывается через 4 секунды.
+
+
+8. Нефункциональные требования
+8.1 Производительность
+95% запросов к API — не более 300 мс при нагрузке 200 одновременных пользователей;
+Загрузка страницы (LCP) — не более 2 секунд;
+Таблица до 10 000 строк — серверная пагинация (limit/offset), по 50 строк на страницу.
+8.2 Безопасность
+Пароли хранятся в БД только в виде bcrypt-хэша (cost factor 12);
+JWT: срок жизни access_token — 8 часов; при 401 — автоматический выход;
+CORS: разрешён только домен фронтенда (в продакшне);
+Все входные данные валидируются через Pydantic (backend) и Yup (frontend);
+Автовыход при 30 минутах бездействия (реализуется через таймер на фронте).
+8.3 Совместимость
+Поддерживаемые браузеры: Chrome 110+, Firefox 110+, Edge 110+;
+Адаптивный дизайн: от 360px (мобильный) до 1920px (десктоп).
+8.4 Надёжность
+Доступность системы — 99,5% рабочего времени;
+Резервное копирование БД — ежедневно, хранение 30 дней;
+Восстановление после сбоя — не более 4 часов.
+
+9. Развёртывание (Docker Compose)
+
+10. Сводная матрица доступа
+
+Слой | Технология | Версия / Пакеты
+Backend | Python + FastAPI | Python 3.11+, FastAPI 0.110+, Pydantic v2, SQLAlchemy 2.0, Alembic
+База данных | PostgreSQL | PostgreSQL 15+, psycopg2-binary
+Аутентификация | JWT | python-jose, passlib[bcrypt]
+Frontend | React + TypeScript | React 18, TypeScript 5, React Router v6, Axios, React Hook Form
+Стилизация | CSS / Tailwind | Tailwind CSS 3 или CSS Modules
+Сборка | Vite | Vite 5
+Деплой | Docker | Docker + Docker Compose
+Роль | Описание | Основные права
+Клиент | Владелец автомобиля, обратившийся в сервис | Создание заявки, просмотр своих заявок, «оплата»
+Мастер смены | Сотрудник, принимающий и выполняющий заявки | Просмотр всех заявок, обработка, смена статуса
+Администратор | Управляющий сервисом | Полный доступ: пользователи, заявки, отчёты, услуги
+  [Браузер (React SPA)]
+         │  HTTP / JSON (REST API)
+         ▼
+  [FastAPI Backend]  ←──────────────────────────────────────────┐
+         │                                                       │
+         │  SQLAlchemy ORM                           JWT Auth    │
+         ▼                                                       │
+  [PostgreSQL DB]                                  [Auth middleware]
+  backend/
+  ├── app/
+  │   ├── main.py            # точка входа FastAPI
+  │   ├── config.py          # настройки (DATABASE_URL, SECRET_KEY и др.)
+  │   ├── database.py        # подключение к PostgreSQL (SQLAlchemy)
+  │   ├── models/            # ORM-модели (таблицы БД)
+  │   │   ├── user.py        # User, Role, UserRole
+  │   │   ├── order.py       # Order (заявка)
+  │   │   └── payment.py     # Payment (заглушка оплаты)
+  │   ├── schemas/           # Pydantic-схемы (валидация входных/выходных данных)
+  │   │   ├── user.py
+  │   │   ├── order.py
+  │   │   └── payment.py
+  │   ├── routers/           # роутеры (endpoints)
+  │   │   ├── auth.py        # POST /auth/login, POST /auth/register
+  │   │   ├── orders.py      # CRUD заявок
+  │   │   ├── users.py       # управление пользователями (только Admin)
+  │   │   └── payments.py    # заглушка оплаты
+  │   ├── services/          # бизнес-логика
+  │   │   ├── auth_service.py
+  │   │   ├── order_service.py
+  │   │   └── payment_service.py
+  │   └── dependencies.py    # get_current_user, role_required
+  ├── alembic/               # миграции БД
+  ├── tests/                 # тесты (pytest)
+  ├── requirements.txt
+  └── Dockerfile
+  frontend/
+  ├── src/
+  │   ├── main.tsx           # точка входа
+  │   ├── App.tsx            # роутинг (React Router v6)
+  │   ├── api/               # Axios-клиенты
+  │   │   ├── axiosInstance.ts   # базовый инстанс с JWT-интерцептором
+  │   │   ├── ordersApi.ts
+  │   │   ├── authApi.ts
+  │   │   └── paymentsApi.ts
+  │   ├── components/        # переиспользуемые компоненты
+  │   │   ├── Navbar/
+  │   │   ├── Modal/
+  │   │   ├── Table/
+  │   │   ├── Button/
+  │   │   └── FormField/
+  │   ├── pages/             # страницы
+  │   │   ├── LoginPage/
+  │   │   ├── OrdersPage/
+  │   │   ├── CreateOrderPage/
+  │   │   ├── PaymentPage/    # заглушка оплаты
+  │   │   ├── UsersPage/      # только Admin
+  │   │   └── ReportsPage/
+  │   ├── store/             # глобальное состояние (Zustand или Context)
+  │   │   └── authStore.ts
+  │   ├── hooks/             # кастомные хуки
+  │   └── types/             # TypeScript-типы
+  ├── index.html
+  ├── vite.config.ts
+  └── Dockerfile
+  -- Роли
+  CREATE TABLE roles (
+      id         SERIAL PRIMARY KEY,
+      name       VARCHAR(50) UNIQUE NOT NULL  -- 'client' | 'master' | 'admin'
+  );
+
+  -- Пользователи
+  CREATE TABLE users (
+      id           SERIAL PRIMARY KEY,
+      first_name   VARCHAR(100) NOT NULL,
+      last_name    VARCHAR(100) NOT NULL,
+      middle_name  VARCHAR(100),
+      email        VARCHAR(255) UNIQUE NOT NULL,
+      phone        VARCHAR(20),
+      password_hash VARCHAR(255) NOT NULL,
+      role_id      INT REFERENCES roles(id) NOT NULL,
+      is_active    BOOLEAN DEFAULT TRUE,
+      created_at   TIMESTAMP DEFAULT NOW()
+  );
+
+  -- Классификатор услуг
+  CREATE TABLE services (
+      id    SERIAL PRIMARY KEY,
+      name  VARCHAR(255) NOT NULL,
+      price NUMERIC(10,2)
+  );
+
+  -- Заявки
+  CREATE TABLE orders (
+      id              SERIAL PRIMARY KEY,
+      client_id       INT REFERENCES users(id) NOT NULL,
+      master_id       INT REFERENCES users(id),  -- назначенный мастер
+      car_brand       VARCHAR(100) NOT NULL,
+      car_model       VARCHAR(100) NOT NULL,
+      car_year        SMALLINT NOT NULL,
+      description     TEXT,
+      status          VARCHAR(30) NOT NULL DEFAULT 'new',
+                   -- 'new' | 'in_progress' | 'in_repair' | 'done'
+      created_at      TIMESTAMP DEFAULT NOW(),
+      updated_at      TIMESTAMP DEFAULT NOW()
+  );
+
+  -- Связь заявка–услуга (многие ко многим)
+  CREATE TABLE order_services (
+      order_id   INT REFERENCES orders(id) ON DELETE CASCADE,
+      service_id INT REFERENCES services(id),
+      PRIMARY KEY (order_id, service_id)
+  );
+
+  -- Платежи (заглушка)
+  CREATE TABLE payments (
+      id              SERIAL PRIMARY KEY,
+      order_id        INT REFERENCES orders(id) UNIQUE,
+      card_last4      VARCHAR(4),   -- последние 4 цифры — только для UI
+      amount          NUMERIC(10,2),
+      status          VARCHAR(20) DEFAULT 'pending',  -- 'pending' | 'stub_ok'
+      created_at      TIMESTAMP DEFAULT NOW()
+  );
+  CREATE INDEX idx_orders_client  ON orders(client_id);
+  CREATE INDEX idx_orders_status  ON orders(status);
+  CREATE INDEX idx_orders_created ON orders(created_at DESC);
+  CREATE INDEX idx_users_email    ON users(email);
+Статус (код) | Отображаемое название | Кто устанавливает | Следующие статусы
+new | Новая | Система (при создании) | in_progress
+in_progress | В работе | Мастер смены (кнопка «Обработать») | in_repair, new
+in_repair | В ремонте | Мастер смены (при сохранении + назначение) | done
+done | Готово | Мастер смены (кнопка «Готово») | — (финальный)
+  Authorization: Bearer <JWT_ACCESS_TOKEN>
+  # dependencies.py
+  def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
+      payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+      user = db.query(User).get(payload['user_id'])
+      if not user: raise HTTPException(401)
+      return user
+
+  def role_required(*roles):
+      def checker(user = Depends(get_current_user)):
+          if user.role.name not in roles:
+              raise HTTPException(403, 'Forbidden')
+          return user
+      return checker
+Метод | URL | Доступ | Описание
+POST | /auth/login | Все | Вход: принимает email + password, возвращает JWT
+POST | /auth/register | Admin | Создание нового пользователя (Admin создаёт мастеров)
+GET | /orders/ | Master, Admin | Список всех заявок с фильтрами
+GET | /orders/my | Client | Список заявок текущего клиента
+POST | /orders/ | All | Создание новой заявки
+GET | /orders/{id} | Master, Admin, Client(свои) | Детали заявки
+PATCH | /orders/{id} | Master, Admin | Редактирование заявки (статус, мастер)
+DELETE | /orders/{id} | Master, Admin | Удаление заявки (только статус new/in_progress)
+GET | /services/ | All | Список услуг
+POST | /services/ | Admin | Создание услуги
+PATCH | /services/{id} | Admin | Редактирование услуги
+GET | /users/ | Admin | Список пользователей
+POST | /users/ | Admin | Создание пользователя
+PATCH | /users/{id} | Admin | Редактирование пользователя
+DELETE | /users/{id} | Admin | Деактивация пользователя
+POST | /payments/stub | Client | Заглушка оплаты (всегда возвращает success)
+GET | /reports/personal | Master(fill), Admin | Отчёт по персоналу
+GET | /reports/finance | Admin | Финансовый отчёт
+  # routers/payments.py
+  @router.post('/stub')
+  def stub_payment(data: PaymentStubIn, db: Session = Depends(get_db),
+                   user = Depends(role_required('client'))):
+      # Данные карты намеренно игнорируются, не сохраняются
+      payment = Payment(order_id=data.order_id, amount=data.amount,
+                        card_last4=data.card_number[-4:],  # только последние 4
+                        status='stub_ok')
+      db.add(payment)
+      db.commit()
+      return {'success': True, 'message': 'Заявка зарегистрирована'}
+  // App.tsx
+  <Routes>
+    <Route path='/login'          element={<LoginPage />} />
+    {/* Защищённые маршруты */}
+    <Route element={<ProtectedRoute />}>
+      <Route path='/orders'       element={<OrdersPage />} />
+      <Route path='/orders/new'   element={<CreateOrderPage />} />
+      <Route path='/payment'      element={<PaymentPage />} />
+      <Route path='/services'     element={<ServicesPage />} />
+      {/* Только Admin */}
+      <Route element={<RoleRoute roles={['admin']} />}>
+        <Route path='/users'      element={<UsersPage />} />
+        <Route path='/reports'    element={<ReportsPage />} />
+      </Route>
+      {/* Master + Admin */}
+      <Route element={<RoleRoute roles={['master','admin']} />}>
+        <Route path='/reports/personal' element={<PersonalReportPage />} />
+      </Route>
+    </Route>
+    <Route path='*' element={<Navigate to='/orders' />} />
+  </Routes>
+  // store/authStore.ts  (Zustand)
+  interface AuthStore {
+    token: string | null
+    user: { id: number; name: string; role: 'client'|'master'|'admin' } | null
+    setAuth: (token: string, user: AuthStore['user']) => void
+    logout: () => void
+  }
+  // После логина: token сохраняется в localStorage, user — в store
+  // Axios-интерцептор автоматически добавляет Bearer токен к каждому запросу
+  // api/axiosInstance.ts
+  const api = axios.create({ baseURL: import.meta.env.VITE_API_URL })
+
+  api.interceptors.request.use(config => {
+    const token = localStorage.getItem('token')
+    if (token) config.headers.Authorization = `Bearer ${token}`
+    return config
+  })
+
+  api.interceptors.response.use(
+    res => res,
+    err => {
+      if (err.response?.status === 401) {
+        localStorage.removeItem('token')
+        window.location.href = '/login'
+      }
+      return Promise.reject(err)
+    }
+  )
+🖥  Страница входа
+  Логотип / название  [изображение + заголовок h1]  — по центру страницы
+  Email  [input[type=email]]  — placeholder: example@mail.ru, обязательное
+  Пароль  [input[type=password]]  — placeholder: ••••••••, обязательное
+  Войти  [button[primary]]  — синяя кнопка, полная ширина формы
+  Ошибка  [alert[error]]  — появляется под кнопкой при неверных данных
+🖥  Navbar — отображается на всех страницах после входа
+  Логотип  [ссылка → /orders]
+  Заявки  [NavLink → /orders]  — все роли
+  Услуги  [NavLink → /services]  — Клиент (просмотр), Admin (редактирование)
+  Пользователи  [NavLink → /users]  — только Admin
+  Отчёты  [NavLink → /reports]  — Master + Admin
+  Имя пользователя + роль  [текст справа]  — например: Иван И.  [Мастер]
+  Выйти  [button[text/icon]]  — очищает localStorage, редирект на /login
+🖥  Страница заявок
+  Панель фильтров  [row с 3 элементами]
+    Диапазон дат  [DateRangePicker (от / до)]  — сбрасывается крестиком
+    Статус  [Select[multiple]]  — Новая, В работе, В ремонте, Готово
+    Поиск  [input[search]]  — по ФИО клиента или модели авто
+  Кнопка «Создать заявку»  [button[primary]]  — справа от фильтров, все роли
+  Таблица заявок  [Table]  — колонки ниже
+    ID  [text]
+    Дата создания ▲▼  [text + sort button]
+    Статус  [Badge (цветной)]  — зелёный=Готово, синий=В работе, серый=Новая
+    Клиент (ФИО)  [text + sort]
+    Телефон / Email  [text]
+    Автомобиль  [text]  — Марка Модель Год
+    Услуга/и  [text (через запятую)]
+    Описание  [text (обрезан до 50 символов)]
+    Действия  [кнопки]  — Мастер: «Обработать», «Связаться»; Admin: + «Удалить»
+🖥  Форма создания заявки (модальное окно или отдельная страница)
+  Заголовок  [h2: «Новая заявка»]
+  Фамилия клиента  [input[text]]  — обязательное
+  Имя клиента  [input[text]]  — обязательное
+  Отчество клиента  [input[text]]  — необязательное
+  Телефон  [input[tel]]  — формат +7(___) ___-__-__, необязательное
+  Email  [input[email]]  — необязательное (хотя бы одно из: телефон/email)
+  Марка автомобиля  [input[text]]  — обязательное
+  Модель автомобиля  [input[text]]  — обязательное
+  Год выпуска  [input[number]]  — мин: 1900, макс: текущий год, обязательное
+  Описание  [textarea]  — необязательное, макс. 1000 символов
+  Услуга/и  [Select[multiple]]  — данные из GET /services/
+  Далее →  [button[primary]]  — переход к странице оплаты-заглушки
+  Отмена  [button[secondary]]  — возврат на /orders
+🖥  Страница оплаты (заглушка)
+  Заголовок  [h2: «Оплата услуг»]
+  Блок «Ваш заказ»  [card]  — Автомобиль, Услуги, Итого: X руб.
+  ── Данные карты (декоративные) ──  [section-header]
+  Номер карты  [input[text]]  — маска: #### #### #### ####, не валидируется
+  Срок действия  [input[text]]  — маска: MM/YY, не валидируется
+  CVV  [input[password]]  — 3 цифры, не валидируется, maxlength=3
+  Имя держателя  [input[text]]  — только заглушка
+  🔒 Оплатить [сумма] руб.  [button[primary, green]]  — полная ширина
+  ← Назад  [button[link]]  — возврат на форму заявки
+  Мелкий текст  [p small gray]  — «Тестовый режим. Реальное списание не производится.»
+🖥  Модальное окно «Обработать заявку»
+  Заголовок  [h3: «Заявка #ID — Обработка»]
+  ФИО клиента  [input[text]]  — предзаполнено, редактируемое
+  Услуга/и  [Select[multiple]]  — предзаполнено
+  Телефон / Email  [input]  — предзаполнено
+  Назначить мастера/бригаду  [Select]  — список из GET /users/?role=master
+  Описание / Комментарий  [textarea]
+  Сохранить изменения  [button[primary]]  — PATCH /orders/{id}, статус → in_repair если назначен мастер
+  Отменить  [button[secondary]]  — закрыть модальное окно без сохранения
+  ✓ Готово  [button[success, green]]  — только если статус in_repair; статус → done
+🖥  Страница управления пользователями
+  Кнопка «Добавить пользователя»  [button[primary]]  — открывает форму
+  Таблица пользователей  [Table]
+    ID, ФИО, Email, Телефон, Роль, Статус (актив/неактив)  [колонки]
+    Действия  [кнопки в строке]  — «Редактировать», «Деактивировать»
+  Форма создания/редактирования  [Modal]  — ФИО, Email, Телефон, Роль, Пароль
+🖥  Страница услуг
+  Список услуг  [карточки или таблица]  — Название + цена
+  Добавить услугу  [button[primary]]  — только Admin
+  Редактировать / Удалить  [кнопки в строке]  — только Admin
+Назначение | CSS-переменная | HEX
+Основной синий | --color-primary | #2E75B6
+Тёмно-синий (заголовки, navbar) | --color-primary-dark | #1F3864
+Светло-синий (фон таблиц) | --color-primary-light | #EEF4FB
+Успех / Готово | --color-success | #1B7A3B
+Ошибка / Удаление | --color-danger | #C0392B
+Предупреждение / В ремонте | --color-warning | #E67E22
+Нейтральный (Новая) | --color-neutral | #6B7280
+Фон страницы | --color-bg | #F8FAFF
+Текст основной | --color-text | #1A1A2E
+Вариант | Класс / описание | Когда использовать
+Primary | bg-blue-600, белый текст, rounded-lg | Главное действие на странице
+Secondary | border border-blue-600, синий текст | Вторичное действие (отмена, назад)
+Success | bg-green-600, белый текст | Завершение (кнопка «Готово»)
+Danger | bg-red-600, белый текст | Удаление, деактивация
+Ghost / Link | только текст, underline on hover | Переходы, мелкие действия
+Disabled | opacity-50, cursor-not-allowed | Во время загрузки, недоступные действия
+Статус | Цвет фона | Цвет текста | Иконка
+Новая | #F3F4F6 | #374151 | 🔵
+В работе | #DBEAFE | #1D4ED8 | ⚙️
+В ремонте | #FEF3C7 | #92400E | 🔧
+Готово | #D1FAE5 | #065F46 | ✅
+  # docker-compose.yml
+  version: '3.9'
+  services:
+    db:
+      image: postgres:15
+      environment:
+        POSTGRES_DB: autoservice
+        POSTGRES_USER: postgres
+        POSTGRES_PASSWORD: secret
+      volumes:
+        - postgres_data:/var/lib/postgresql/data
+    backend:
+      build: ./backend
+      ports: ['8000:8000']
+      environment:
+        DATABASE_URL: postgresql://postgres:secret@db:5432/autoservice
+        SECRET_KEY: your-secret-key
+      depends_on: [db]
+    frontend:
+      build: ./frontend
+      ports: ['3000:80']
+      environment:
+        VITE_API_URL: http://localhost:8000
+  volumes:
+    postgres_data:
+Функция / Экран | Клиент | Мастер смены | Администратор
+Страница входа (/login) | ✓ | ✓ | ✓
+Создание заявки | ✓ | ✓ | ✓
+Просмотр своих заявок | ✓ | — | ✓
+Просмотр всех заявок | — | ✓ | ✓
+Обработка / редактирование заявок | — | ✓ | ✓
+Удаление заявок | — | ✓ | ✓
+Страница оплаты (заглушка) | ✓ | — | —
+Просмотр услуг | ✓ | — | ✓
+Редактирование услуг | — | — | ✓
+Заполнение отчёта по персоналу | — | ✓ | ✓
+Просмотр отчёта по персоналу | — | — | ✓
+Финансовый отчёт | — | — | ✓
+Управление пользователями | — | — | ✓
