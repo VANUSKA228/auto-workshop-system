@@ -13,10 +13,6 @@ router = APIRouter()
 
 @router.get("/public", response_model=list[WorkshopRead])
 def list_workshops_public(db: Session = Depends(get_db)):
-    """
-    Публичный список мастерских (без авторизации).
-    Используется на форме регистрации клиента для выбора филиала.
-    """
     return db.query(Workshop).order_by(Workshop.city, Workshop.name).all()
 
 
@@ -25,15 +21,9 @@ def list_workshops(
     db: Session = Depends(get_db),
     user=Depends(role_required("admin", "master")),
 ):
-    """
-    Список всех мастерских сети.
-    - Admin видит все мастерские
-    - Master видит только свою мастерскую
-    """
     if user.role.name == "admin":
         return db.query(Workshop).order_by(Workshop.city, Workshop.name).all()
     else:
-        # Master видит только свои мастерские
         workshop_ids = [w.id for w in user.workshops]
         return db.query(Workshop).filter(Workshop.id.in_(workshop_ids)).all()
 
@@ -44,17 +34,15 @@ def get_workshop(
     db: Session = Depends(get_db),
     user=Depends(role_required("admin", "master")),
 ):
-    """Получить информацию о конкретной мастерской."""
     ws = db.query(Workshop).filter(Workshop.id == workshop_id).first()
     if not ws:
         raise HTTPException(404, "Мастерская не найдена")
-    
-    # Master может видеть только свои мастерские
+
     if user.role.name == "master":
         workshop_ids = [w.id for w in user.workshops]
         if workshop_id not in workshop_ids:
             raise HTTPException(403, "Нет доступа к этой мастерской")
-    
+
     return ws
 
 
@@ -64,7 +52,6 @@ def create_workshop(
     db: Session = Depends(get_db),
     user=Depends(role_required("admin")),
 ):
-    """Создание новой мастерской (только админ)."""
     ws = Workshop(
         name=data.name,
         city=data.city,
@@ -84,7 +71,6 @@ def update_workshop(
     db: Session = Depends(get_db),
     user=Depends(role_required("admin")),
 ):
-    """Обновление информации о мастерской (только админ)."""
     ws = db.query(Workshop).filter(Workshop.id == workshop_id).first()
     if not ws:
         raise HTTPException(404, "Мастерская не найдена")
@@ -101,7 +87,6 @@ def delete_workshop(
     db: Session = Depends(get_db),
     user=Depends(role_required("admin")),
 ):
-    """Удаление мастерской (только админ)."""
     ws = db.query(Workshop).filter(Workshop.id == workshop_id).first()
     if not ws:
         raise HTTPException(404, "Мастерская не найдена")
@@ -116,22 +101,19 @@ def get_workshop_users(
     db: Session = Depends(get_db),
     user=Depends(role_required("admin", "master")),
 ):
-    """Получить список пользователей в мастерской."""
     ws = db.query(Workshop).filter(Workshop.id == workshop_id).first()
     if not ws:
         raise HTTPException(404, "Мастерская не найдена")
-    
-    # Master может видеть только свои мастерские
+
     if user.role.name == "master":
         workshop_ids = [w.id for w in user.workshops]
         if workshop_id not in workshop_ids:
             raise HTTPException(403, "Нет доступа к этой мастерской")
-    
-    # Получаем пользователей через связь M2M
+
     users = db.query(User).join(user_workshop_link).filter(
         user_workshop_link.c.workshop_id == workshop_id
     ).all()
-    
+
     return [
         {
             "id": u.id,
@@ -151,24 +133,21 @@ def assign_user_to_workshop(
     db: Session = Depends(get_db),
     user=Depends(role_required("admin")),
 ):
-    """Назначить пользователя в мастерскую (только админ)."""
     ws = db.query(Workshop).filter(Workshop.id == workshop_id).first()
     if not ws:
         raise HTTPException(404, "Мастерская не найдена")
-    
+
     u = db.query(User).filter(User.id == user_id).first()
     if not u:
         raise HTTPException(404, "Пользователь не найден")
-    
-    # Проверяем, не назначен ли уже
+
     existing = db.query(user_workshop_link).filter(
         user_workshop_link.c.workshop_id == workshop_id,
         user_workshop_link.c.user_id == user_id
     ).first()
     if existing:
         raise HTTPException(400, "Пользователь уже назначен в эту мастерскую")
-    
-    # Добавляем связь
+
     db.execute(
         user_workshop_link.insert().values(
             user_id=user_id,
@@ -177,7 +156,7 @@ def assign_user_to_workshop(
         )
     )
     db.commit()
-    
+
     return {"message": "Пользователь назначен в мастерскую"}
 
 
@@ -188,7 +167,6 @@ def remove_user_from_workshop(
     db: Session = Depends(get_db),
     user=Depends(role_required("admin")),
 ):
-    """Удалить пользователя из мастерской (только админ)."""
     db.execute(
         user_workshop_link.delete().where(
             user_workshop_link.c.workshop_id == workshop_id,

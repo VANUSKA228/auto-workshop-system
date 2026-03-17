@@ -1,9 +1,3 @@
-# backend/app/main.py
-"""
-Точка входа FastAPI-приложения. Версия 1 (auth-only)
-Только авторизация и регистрация
-"""
-
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -13,8 +7,8 @@ from .routers import auth, workshops
 settings = get_settings()
 
 app = FastAPI(
-    title="API автосервиса — Версия 1",
-    description="REST API для авторизации и регистрации (ТЗ v1.0)",
+    title="API автосервиса",
+    description="REST API для авторизации и регистрации",
     version="1.0.0",
 )
 

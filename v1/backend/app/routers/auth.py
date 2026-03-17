@@ -1,10 +1,3 @@
-# backend/app/routers/auth.py
-"""
-Роутер авторизации: логин и регистрация.
-POST /auth/login — принимает email+password, возвращает JWT и данные пользователя.
-POST /auth/register — создание пользователя (только Admin).
-"""
-
 from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, Depends, HTTPException, status
 from jose import jwt
@@ -25,21 +18,15 @@ settings = get_settings()
 
 
 def verify_password(plain: str, hashed: str) -> bool:
-    """Проверяет пароль против bcrypt-хэша. ТЗ: cost factor 12."""
     h = hashed.encode("utf-8") if isinstance(hashed, str) else hashed
     return bcrypt.checkpw(plain.encode("utf-8"), h)
 
 
 def get_password_hash(password: str) -> str:
-    """Хэширует пароль через bcrypt. ТЗ: cost factor 12."""
     return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt(rounds=BCRYPT_ROUNDS)).decode("utf-8")
 
 
 def create_access_token(user_id: int, role_name: str) -> str:
-    """
-    Создаёт JWT access-токен.
-    Payload: user_id, role (для проверки прав на фронте), exp (срок жизни 8 часов).
-    """
     expire = datetime.now(timezone.utc) + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
     payload = {"sub": str(user_id), "user_id": user_id, "role": role_name, "exp": expire}
     return jwt.encode(payload, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
@@ -47,15 +34,6 @@ def create_access_token(user_id: int, role_name: str) -> str:
 
 @router.post("/login", response_model=LoginResponse)
 def login(data: LoginRequest, db: Session = Depends(get_db)):
-    """
-    Вход в систему.
-
-    Логика:
-    1. Ищем пользователя по email.
-    2. Проверяем пароль через bcrypt.
-    3. Если is_active=False — отказ.
-    4. Генерируем JWT, возвращаем token и краткие данные user для фронта.
-    """
     user = db.query(User).filter(User.email == data.email).first()
     if not user or not verify_password(data.password, user.password_hash):
         raise HTTPException(
@@ -83,11 +61,6 @@ def register(
     db: Session = Depends(get_db),
     user=Depends(role_required("admin")),
 ):
-    """
-    Регистрация нового пользователя. Только Admin.
-    Admin создаёт мастеров и клиентов через этот эндпоинт.
-    Пароль хэшируется перед сохранением в БД.
-    """
     if db.query(User).filter(User.email == data.email).first():
         raise HTTPException(status_code=400, detail="Email уже занят")
 
@@ -103,8 +76,7 @@ def register(
     db.add(new_user)
     db.commit()
     db.refresh(new_user)
-    
-    # Привязываем пользователя к мастерским (M2M)
+
     if data.workshop_ids:
         for wid in data.workshop_ids:
             ws = db.query(Workshop).filter(Workshop.id == wid).first()
@@ -118,7 +90,7 @@ def register(
                 )
             )
         db.commit()
-    
+
     return db.query(User).filter(User.id == new_user.id).first()
 
 
@@ -127,13 +99,6 @@ def register_client(
     data: ClientRegisterRequest,
     db: Session = Depends(get_db),
 ):
-    """
-    Самостоятельная регистрация клиента.
-
-    - Создаёт пользователя с ролью `client`.
-    - Не требует авторизации.
-    - Возвращает JWT-токен и краткие данные пользователя, как /auth/login.
-    """
     if db.query(User).filter(User.email == data.email).first():
         raise HTTPException(status_code=400, detail="Email уже занят")
 
@@ -157,8 +122,7 @@ def register_client(
     db.add(new_user)
     db.commit()
     db.refresh(new_user)
-    
-    # Привязываем клиента к мастерской (M2M)
+
     db.execute(
         user_workshop_link.insert().values(
             user_id=new_user.id,

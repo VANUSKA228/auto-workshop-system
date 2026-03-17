@@ -1,7 +1,3 @@
-/**
- * Layout с Navbar. ИСЛАМ: Navbar читает роль из authStore,
- * условно скрывает пункты меню (Users, Reports — только admin/master).
- */
 import { Outlet } from 'react-router-dom';
 import Navbar from '../Navbar/Navbar';
 
